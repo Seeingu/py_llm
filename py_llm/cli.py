@@ -8,10 +8,35 @@ import os
 import traceback
 import pyperclip
 
-MODEL = "deepseek/deepseek-chat"
+DS_MODEL = "deepseek/deepseek-chat"
+DS_REASONER_MODEL = "deepseek/deepseek-reasoner"
 SYSTEM_MESSAGE = "You are an experienced frontend programmer. 回答尽可能使用中文"
 
-async def base_completion_call(input: str, completion_func, model_config: dict, message_history=None):
+# 模型配置
+DS_MODEL_CONFIG = {
+    "model": DS_MODEL,
+    "messages": None,  # 将在调用时设置
+    "stream": True
+}
+DS_REASONER_MODEL_CONFIG = {
+    "model": DS_REASONER_MODEL,
+    "messages": None,  # 将在调用时设置
+    "stream": True
+}
+
+DOUBAO_API_BASE = "https://ark.cn-beijing.volces.com/api/v3"
+DOUBAO_MODEL = "openai/doubao-1-5-pro-256k-250115"
+DOUBAO_MODEL_CONFIG = {
+    "model": DOUBAO_MODEL,
+    "api_key": os.environ['DOUBAO_API_KEY'],
+    "api_base": DOUBAO_API_BASE,
+    "messages": None,  # 将在调用时设置
+    "stream": True
+}
+
+model_config=DOUBAO_MODEL_CONFIG
+
+async def base_completion_call(input: str,  config: dict, message_history=None):
     # 如果没有提供消息历史，则初始化一个新的历史
     if message_history is None:
         message_history = [
@@ -22,7 +47,7 @@ async def base_completion_call(input: str, completion_func, model_config: dict, 
     message_history.append({"role": "user", "content": input})
     
     try:
-        response = await completion_func(**model_config)
+        response = await acompletion(**config)
         print(f"response: {response}")
         assistant_response = ""
         async for chunk in response:
@@ -41,28 +66,20 @@ async def base_completion_call(input: str, completion_func, model_config: dict, 
         print(f"\n错误发生: {traceback.format_exc()}")
         return message_history
 
-async def ds_completion_call(input: str, message_history=None):
-    model_config = {
-        "model": MODEL,
-        "messages": message_history or [{"role": "system", "content": SYSTEM_MESSAGE}],
-        "stream": True
-    }
-    return await base_completion_call(input, acompletion, model_config, message_history)
-
-DOUBAO_API_BASE = "https://ark.cn-beijing.volces.com/api/v3"
-DOUBAO_MODEL = "openai/doubao-1-5-pro-256k-250115"
-async def doubao_completion_call(input: str, message_history=None):
-    model_config = {
-        "model": DOUBAO_MODEL,
-        "api_key": os.environ['DOUBAO_API_KEY'],
-        "api_base": DOUBAO_API_BASE,
-        "messages": message_history or [{"role": "system", "content": SYSTEM_MESSAGE}],
-        "stream": True
-    }
-    return await base_completion_call(input, acompletion, model_config, message_history)
+async def completion_call(input: str, message_history=None):
+    """统一的completion调用函数
+    
+    Args:
+        input: 用户输入的文本
+        config: 模型配置字典
+        message_history: 消息历史记录，默认为None
+    """
+    config = model_config.copy()
+    config["messages"] = message_history or [{"role": "system", "content": SYSTEM_MESSAGE}]
+    return await base_completion_call(input, config, message_history)
 
 
-async def handle_interactive_loop(message_history, completion_callback):
+async def handle_interactive_loop(message_history):
     """处理交互式对话循环的基础函数
     
     Args:
@@ -88,7 +105,7 @@ async def handle_interactive_loop(message_history, completion_callback):
             
             # 调用completion_call并更新消息历史
             print()
-            message_history = await completion_callback(user_input, message_history)
+            message_history = await completion_call(user_input, message_history)
             print("\n")
         except KeyboardInterrupt:
             print("\n退出交互模式")
@@ -103,7 +120,7 @@ async def interactive_mode():
     message_history = [
         {"role": "system", "content": SYSTEM_MESSAGE}
     ]
-    await handle_interactive_loop(message_history, doubao_completion_call)
+    await handle_interactive_loop(message_history)
 
 async def single_input_mode(input_text: str, system_message=SYSTEM_MESSAGE):
     """处理单次输入模式的异步函数，支持多轮对话"""
@@ -113,11 +130,11 @@ async def single_input_mode(input_text: str, system_message=SYSTEM_MESSAGE):
     
     # 处理初始输入
     print()
-    message_history = await doubao_completion_call(input_text, message_history)
+    message_history = await completion_callback(input_text, message_history)
     print("\n")
     
     # 继续进行多轮对话
-    await handle_interactive_loop(message_history, doubao_completion_call)
+    await handle_interactive_loop(message_history)
 
 def main():
     """命令行工具的主入口点"""
@@ -139,21 +156,40 @@ def main():
         action="store_true",
         help='从剪贴板读取最近一条内容'
     )
+    parser.add_argument(
+        "-m", "--model",
+        choices=['ds', 'doubao'],
+        default='doubao',
+        help='选择使用的模型配置 (ds: DeepSeek, doubao: 豆包)'
+    )
 
     args = parser.parse_args()
+    
+    # 根据选择的模型确定使用的回调函数
+    # 根据选择的模型确定使用的回调函数和模型名称
+    if args.model == 'ds':
+        model_name = "DeepSeek"
+        model_config = DS_MODEL_CONFIG 
+    elif args.model == 'ds-r':
+        model_name = "DeepSeek Reasoner"
+        model_config = DS_REASONER_MODEL_CONFIG
+    else:
+        model_name = "豆包"
+        model_config = DOUBAO_MODEL_CONFIG
+    print(f"\n当前使用的模型: {model_name}\n")
+
     if args.url is not None:
         raise "not implemented"
     elif args.paste:
         clipboard_content = pyperclip.paste()
         if clipboard_content:
-            # 检查是否为链接（简单判断是否以 http:// 或 https:// 开头）
             if clipboard_content.startswith(('http://', 'https://')):
                 clipboard_content = f"summarize {clipboard_content}"
-            asyncio.run(single_input_mode(clipboard_content))
+            asyncio.run(single_input_mode(clipboard_content ))
         else:
             print("剪贴板为空")
     elif args.text:
-        asyncio.run(single_input_mode(args.text))
+        asyncio.run(single_input_mode(args.text ))
     else:
         # 默认使用交互模式
         asyncio.run(interactive_mode())
