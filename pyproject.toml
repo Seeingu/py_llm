@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "py_llm"
+version = "0.1.0"
+description = "一个基于 LiteLLM 的命令行工具，支持多轮对话、剪贴板输入和 URL 内容处理"
+authors = ["Seeingu <seeingasu@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+requests = "^2.31.0"
+litellm = "^1.65.0"
+socksio = "^1.0.0"
+pyperclip = "^1.8.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+py_llm = "py_llm.cli:main"
